@@ -73,11 +73,24 @@ def mainSegmentation(config, logger, avis, imgsets):
 
     timer['processing_start'] = time()
     # Prepare workers for receiving frames
-    num_threads = min(os.cpu_count() - 2, max(len(avis), len(imgsets)))
-    logger.info(f"Starting processing with {num_threads} processes...")
+    # Calculate the 80% cap for yucatan
+    cpu_cap = int(os.cpu_count()*0.8)
+    
+    # HARD LIMIT for NFS: Prevent network saturation
+    # Even if we have 40 cores, only use 4 for network file reading
+    max_nfs_workers = 4
+    
+    # Use the smaller of: the 80% cap OR the number of files we actually have to process
+    num_workers = min(cpu_cap, max(len(avis), len(imgsets)))
+
+    # Ensure we don't accidentally try to start 0 workers
+    num_workers = max(1, num_workers)
+    
+    logger.info(f"Starting processing with {num_workers} processes (capped at 80% CPU)...")
+    logger.info(f"NFS Safety: Limiting concurrent workers to {num_workers}")
 
     if len(avis) > 0:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
             future_to_file = {executor.submit(
                 process_video, segmentation_dir, config, filename): filename for filename in avis}
 
@@ -98,7 +111,7 @@ def mainSegmentation(config, logger, avis, imgsets):
                     n += 1
 
     if len(imgsets) > 0:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
             future_to_file = {executor.submit(
                 process_image_dir, folder, segmentation_dir, config): folder for folder in imgsets}
 
@@ -123,7 +136,7 @@ def mainSegmentation(config, logger, avis, imgsets):
     if len(avis) > 0 and config['segmentation']['cleanup']:
         # Important to isolate processing and cleanup since the threads don't know when everything is done processing.
         logger.info('Archiving results and cleaning up.')
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
             future_to_file = {executor.submit(
                 cleanupFile, filename, segmentation_dir, config): filename for filename in avis}
             init_time2 = time()
@@ -144,7 +157,7 @@ def mainSegmentation(config, logger, avis, imgsets):
     if len(imgsets) > 0 and config['segmentation']['cleanup']:
         # Important to isolate processing and cleanup since the threads don't know when everything is done processing.
         logger.info('Archiving results and cleaning up.')
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
             future_to_file = {executor.submit(
                 cleanupFile, filename, segmentation_dir, config): filename for filename in imgsets}
 

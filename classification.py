@@ -30,6 +30,7 @@ License:
 
 import json
 from dpi_fun import *
+from dpi_fun.functionsClassification_Gemini import * # import the Gemini-revised version
 
 if __name__ == "__main__":
     """

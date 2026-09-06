@@ -5,7 +5,7 @@ base.dir = '/media/plankline/Data/Data/SNR10/'
 transects = readRDS('/media/plankline/Data/Sensor/SKQJ2022_data/_rdata/transects.rds')
 transect.times = sapply(c(1:length(transects)), function(x) {mean(transects[[x]]$Time, na.rm = T)})
 
-## Determine what sesnor data goes with these files:
+## Determine what sensor data goes with these files:
 transect.n = which.min((as.numeric(mean(bin$time, na.rm = T)) - transect.times)^2)
 sensor = transects[[transect.n]]
 sensor$Time = sensor$Time - 3600 * 8 ## Adj timezone

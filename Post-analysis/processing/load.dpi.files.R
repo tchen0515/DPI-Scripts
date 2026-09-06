@@ -20,24 +20,26 @@ load.dpi.files = function(files, skip = 1, min.size = 1024, verbose = T) {
   dat = data.table::fread(files[1], skip = skip, fill = T)
   message('Done.')
   
-  ## Read in rest of data
-  for (i in 2:length(files)) {
-    message(' Attempting to load file ', i, '... ', appendLF = F)
-    temp = data.table::fread(files[i], skip = skip, fill = T, verbose = F, showProgress = F)
-    
-    if (ncol(temp) != ncol(dat)) {
-      message('Invalid number of columns (', ncol(temp), ' vs ', ncol(dat), '), skipping.')
-    } else {
-      dat = rbind.data.frame(dat, temp, fill = T)
-      message('Done.')
+  ## Read in rest of data (FIX: Added length check to prevent 2:1 vector creation)
+  if (length(files) > 1) {
+    for (i in 2:length(files)) {
+      message(' Attempting to load file ', i, '... ', appendLF = F)
+      temp = data.table::fread(files[i], skip = skip, fill = T, verbose = F, showProgress = F)
+      
+      if (ncol(temp) != ncol(dat)) {
+        message('Invalid number of columns (', ncol(temp), ' vs ', ncol(dat), '), skipping.')
+      } else {
+        dat = rbind.data.frame(dat, temp, fill = T)
+        message('Done.')
+      }
     }
   }
   
   message(' Setting up datetimes and ordering files.')
   colnames(dat)[1] = 'Time'
   
-  ## Make and sort by time
-  dat$Time = as.POSIXct(dat$Time, origin = TheSource::make.time(1904))
+  ## Make and sort by time (PATCHED to remove TheSource dependency)
+  dat$Time = as.POSIXct(dat$Time, origin = "1904-01-01", tz = "UTC")
   dat = dat[order(dat$Time),]
   
   message('Finished.')

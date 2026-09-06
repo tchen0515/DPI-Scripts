@@ -1,13 +1,13 @@
+setwd('F:/DPI/DPI-Scripts _noG/Post-analysis')
 source('processing/low level utilities.R')
 source('processing/mid level utilities.R')
 
-
 #### User input: 
 
-camera = 'camera0'
-transect = 'test1'
+camera = 'RR2510-camera2'
+transect = 'cycle2_day2'
 segmentationName = 'REG'
-modelName = 'iota121v1'
+modelName = 'DNet121cce2'
 minPerimeter = 100
 
 #### Autopilot from here:

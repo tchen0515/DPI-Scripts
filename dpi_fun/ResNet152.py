@@ -1,3 +1,5 @@
+# Modification are done in 07/14/2026 (Gemini's)
+
 import tensorflow as tf
 
 def augmentation_block(x):
@@ -21,7 +23,7 @@ def Model(input_shape, num_classes):
     x = tf.keras.layers.Conv2D(64, (7, 7), strides=(2, 2), padding='same', kernel_initializer='he_normal')(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation('relu')(x)
-    x = tf.keras.layers.MaxPooling2D((3, 3), strides=(2, 2))(x)
+    x = tf.keras.layers.MaxPooling2D((3, 3), strides=(2, 2), padding='same')(x)
 
     # ResNet-34
     x = make_advanced_block_layer(x, filter_num=64, blocks=3)
@@ -42,11 +44,12 @@ def Model(input_shape, num_classes):
 def make_basic_block_base(inputs, filter_num, stride=1):
     x = tf.keras.layers.Conv2D(filters=filter_num, kernel_size=(3, 3), strides=stride, kernel_initializer='he_normal', padding="same")(inputs)
     x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Activation('relu')(x) # <-- ADDED ReLU
     x = tf.keras.layers.Conv2D(filters=filter_num, kernel_size=(3, 3), strides=1, kernel_initializer='he_normal', padding="same")(x)
     x = tf.keras.layers.BatchNormalization()(x)
 
     shortcut = inputs
-    if stride != 1:
+    if stride != 1 or inputs.shape[-1] != filter_num: # <-- ADDED DEPTH CHECK
         shortcut = tf.keras.layers.Conv2D(filters=filter_num, kernel_size=(1, 1), strides=stride, kernel_initializer='he_normal')(inputs)
         shortcut = tf.keras.layers.BatchNormalization()(shortcut)
 
@@ -67,16 +70,26 @@ def make_basic_block_layer(inputs, filter_num, blocks, stride=1):
 
 ## Functions for ResNet50, 101, and 152
 def make_advanced_block_base(inputs, filter_num, stride=1):
+    # 1. 1x1 reduction (stays stride 1)
     x = tf.keras.layers.Conv2D(filters=filter_num, kernel_size=(1, 1), strides=1, kernel_initializer='he_normal', padding="same")(inputs)
     x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Conv2D(filters=filter_num, kernel_size=(3, 3), strides=1, kernel_initializer='he_normal', padding="same")(x)
+    x = tf.keras.layers.Activation('relu')(x)
+    
+    # 2. 3x3 convolution (THIS MUST BE strides=stride to shrink the image)
+    x = tf.keras.layers.Conv2D(filters=filter_num, kernel_size=(3, 3), strides=stride, kernel_initializer='he_normal', padding="same")(x)
     x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Activation('relu')(x)
+    
+    # 3. 1x1 expansion (stays stride 1)
     x = tf.keras.layers.Conv2D(filters=filter_num*4, kernel_size=(1, 1), strides=1, kernel_initializer='he_normal', padding="same")(x)
     x = tf.keras.layers.BatchNormalization()(x)
     
-    shortcut = inputs
-    shortcut = tf.keras.layers.Conv2D(filters=filter_num*4, kernel_size=(1, 1), strides=stride, kernel_initializer='he_normal')(inputs)
-    shortcut = tf.keras.layers.BatchNormalization()(shortcut)
+    # <-- REPLACED WITH CONDITIONAL LOGIC
+    if stride != 1 or inputs.shape[-1] != filter_num*4:
+        shortcut = tf.keras.layers.Conv2D(filters=filter_num*4, kernel_size=(1, 1), strides=stride, kernel_initializer='he_normal')(inputs)
+        shortcut = tf.keras.layers.BatchNormalization()(shortcut)
+    else:
+        shortcut = inputs
 
     x = tf.keras.layers.add([x, shortcut])
     x = tf.keras.layers.Activation('relu')(x)

@@ -30,12 +30,20 @@ License:
 
 import json
 from dpi_fun import *
-from dpi_fun.DenseNet121 import *
+import tensorflow as tf # <-- ADD THIS HERE (Around Row 35)
 
 if __name__ == "__main__":
     with open('config.json', 'r') as f:
         config = json.load(f)
 
     logger = setup_logger('Training (main)', config)
+    
+    # <-- ADD THIS ENTIRE BLOCK HERE (Around Row 41) -->
+    if config['training'].get('use_mixed_precision', False):
+        logger.info("Enabling Mixed Precision (float16)")
+        tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    else:
+        logger.info("Using standard 32-bit precision")
+    # <------------------------------------------------>
 
     mainTrain(config, logger)

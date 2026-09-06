@@ -29,6 +29,8 @@ License:
 """
 
 import json
+import subprocess
+import getpass
 from dpi_fun import *
 #from dpi_fun.functions import *
 #from dpi_fun.functionsSegmentation import *
@@ -67,5 +69,30 @@ if __name__ == "__main__":
     with open(json_save_pathname, "w") as outfile:
         outfile.write(json_object)
         logger.debug("Sidecar writting finished.")
+        
+    ## --- NEW CLEANUP CODE ---
+    logger.info("Task complete. Running scratch directory cleanup...")
+    
+    # Get the scratch dir from config, default to /dev/shm if not found
+    try:
+        scratch_dir = config['segmentation']['scratch_dir']
+    except KeyError:
+        scratch_dir = '/dev/shm/tchen/'
+
+    # Get the current username (e.g., 'tchen')
+    current_user = getpass.getuser() 
+
+    # Construct the find command you provided earlier
+    cleanup_command = ['find', scratch_dir, '-user', current_user, '-type', 'f', '-delete']
+    
+    try:
+        # Run the command
+        subprocess.run(cleanup_command, check=True)
+        logger.info(f"Successfully cleaned up files in {scratch_dir} for user {current_user}.")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to clean up scratch directory: {e}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during cleanup: {e}")
+    ## ------------------------
 
     sys.exit(0) # Successful close

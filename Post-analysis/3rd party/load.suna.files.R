@@ -1,4 +1,5 @@
 #' @title Load DPI Publisher Files
+#' @title Load SUNA Files
 #' @export
 load.suna.files = function(files, skip = 21, min.size = 1024, verbose = T) {
   message('Starting to load in files, ', length(files), ' files specified.')
@@ -15,32 +16,42 @@ load.suna.files = function(files, skip = 21, min.size = 1024, verbose = T) {
   message(' Identified ', sum(file$keep), ' file(s) of valid size and ', sum(!file$keep), ' file(s) of invalid size.')
   files = file$files[file$keep]
   
+  if (length(files) == 0) {
+    stop("No valid files found.")
+  }
+  
   ## Load in first file.
   message(' Attempting to load file 1... ', appendLF = F)
   dat = data.table::fread(files[1], skip = skip, fill = T)
-  dat = data.frame(Time = make.time(year = substr(dat$V2, 1, 4)) + 86400 * as.numeric(substr(dat$V2, 5, 7)) + 3600 * dat$V3,
+  
+  jan1_sec = as.numeric(as.POSIXct(paste0(substr(dat$V2, 1, 4), "-01-01"), tz = "UTC"))
+  dat = data.frame(Time = jan1_sec + 86400 * as.numeric(substr(dat$V2, 5, 7)) + 3600 * dat$V3,
                    Nitrate = dat$V4)
   dat$Time = as.numeric(dat$Time)
   message('Done.')
   
-  ## Read in rest of data
-  for (i in 2:length(files)) {
-    message(' Attempting to load file ', i, '... ', appendLF = F)
-    temp = data.table::fread(files[i], skip = skip, fill = T, verbose = F, showProgress = F)
-    temp = data.frame(Time = make.time(year = substr(temp$V2, 1, 4)) + 86400 * as.numeric(substr(temp$V2, 5, 7)) + 3600 * temp$V3,
-                     Nitrate = temp$V4)
-    temp$Time = as.numeric(temp$Time)
-    
-    if (ncol(temp) != ncol(dat)) {
-      message('Invalid number of columns (', ncol(temp), ' vs ', ncol(dat), '), skipping.')
-    } else {
-      dat = rbind.data.frame(dat, temp, fill = T)
-      message('Done.')
+  ## Read in rest of data (FIX: Added single-file guard)
+  if (length(files) > 1) {
+    for (i in 2:length(files)) {
+      message(' Attempting to load file ', i, '... ', appendLF = F)
+      temp = data.table::fread(files[i], skip = skip, fill = T, verbose = F, showProgress = F)
+      
+      jan1_sec_temp = as.numeric(as.POSIXct(paste0(substr(temp$V2, 1, 4), "-01-01"), tz = "UTC"))
+      temp = data.frame(Time = jan1_sec_temp + 86400 * as.numeric(substr(temp$V2, 5, 7)) + 3600 * temp$V3,
+                        Nitrate = temp$V4)
+      temp$Time = as.numeric(temp$Time)
+      
+      if (ncol(temp) != ncol(dat)) {
+        message('Invalid number of columns (', ncol(temp), ' vs ', ncol(dat), '), skipping.')
+      } else {
+        dat = rbind.data.frame(dat, temp, fill = T)
+        message('Done.')
+      }
     }
   }
   
-  ## Make and sort by time
-  dat$Time = conv.time.unix(dat$Time)
+  ## Make and sort by time (Base R UNIX time conversion)
+  dat$Time = as.POSIXct(dat$Time, origin = "1970-01-01", tz = "UTC")
   dat = dat[order(dat$Time),]
   
   message('Finished.')

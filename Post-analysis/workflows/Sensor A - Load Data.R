@@ -1,21 +1,43 @@
+#library(devtools)
+#devtools::install_github("tbrycekelly/TheSource", dependencies = FALSE) # The package's repo
+#library(TheSource)
+library(oce)   # alternation of TheSource
 library(openxlsx)
-library(TheSource)
-library(PlanklinePS)
+#library(PlanklinePS)
+## Source all sensor input function scripts
+source('F:/GithubDesktop/DPI-Scripts/Post-analysis/processing/load.dpi.files.R')
+source('F:/GithubDesktop/DPI-Scripts/Post-analysis/3rd party/load.acs.files.R')
+source('F:/GithubDesktop/DPI-Scripts/Post-analysis/3rd party/load.lisst.files.R')
+source('F:/GithubDesktop/DPI-Scripts/Post-analysis/3rd party/load.suna.files.R')
 
+# Helper function to replace make_time_utc()
+make_time_utc <- function(year) as.POSIXct(paste0(year, "-01-01"), tz = "UTC")
+
+## Source all function scripts in a specific folder
+function_dir <- "F:/DPI/GithubDesktop/Post-analysis/processing/"
+function_files <- list.files(path = function_dir, pattern = "\\.R$", full.names = TRUE)
+
+for (file in function_files) {
+  tryCatch({
+    source(file)
+  }, error = function(e) {
+    message("Skipping script with top-level code: ", basename(file))
+  })
+}
 
 ## Setup
-root.dir = '/media/plankline/Data/Sensor/SKQJ2022_data/'
+root.dir = 'F:/DPI/DPI-sensor/P2402-sensor/sensor_data/cycle1_day1/'
 
 ## Default directories
 directories = list(
   root = root.dir,
-  gps = paste0(root.dir, 'VIPF_LOGS/GPS Publisher/'),
-  ctd1 = paste0(root.dir, 'VIPF_LOGS/CTD 1 Publisher/'),
-  ctd2 = paste0(root.dir, 'VIPF_LOGS/CTD 2 Publisher/'),
-  ad = paste0(root.dir, 'VIPF_LOGS/AD1216 Publisher/'),
-  fl1 = paste0(root.dir, 'VIPF_LOGS/Fluorometer 1 Publisher/'),
-  fl2 = paste0(root.dir, 'VIPF_LOGS/Fluorometer 2 Publisher/'),
-  eng = paste0(root.dir, 'VIPF_LOGS/Inclinometer Publisher/'),
+  gps = paste0(root.dir, 'GPS Publisher/'),
+  ctd1 = paste0(root.dir, 'CTD 1 Publisher/'),
+  ctd2 = paste0(root.dir, 'CTD 2 Publisher/'),
+  ad = paste0(root.dir, 'AD1216 Publisher/'),
+  fl1 = paste0(root.dir, 'Fluorometer 1 Publisher/'),
+  fl2 = paste0(root.dir, 'Fluorometer 2 Publisher/'),
+  eng = paste0(root.dir, 'Inclinometer Publisher/'),
   lisst = paste0(root.dir, 'LISST/'),
   acs = paste0(root.dir, 'ACS/'),
   suna = paste0(root.dir, 'SUNA/'),
@@ -38,17 +60,21 @@ gps.files = list.files(path = directories$gps,
                        pattern = '*.csv')
 gps = load.dpi.files(gps.files)
 
-colnames(gps) = c('Time', 'Message', 'datetime', 'Latitude', 'Hemisphere',
-                  'Longitude', 'other hemi',
-                  'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14','v15','vq6','v17','v18')
+## Assign names to all relevant columns
+colnames(gps)[1:7] = c('Time', 'Message', 'datetime', 'Latitude', 'Hemisphere', 'Longitude', 'Hemi_Lon')
 
-## Fix structure and pull out good data only
-gps$Latitude = floor(gps$Latitude/100) + (gps$Latitude - floor(gps$Latitude/100)*100)/60
-gps$Longitude = -1 * (floor(gps$Longitude/100) + (gps$Longitude - floor(gps$Longitude/100)*100)/60)
-gps = gps[,c(1,4,6)]
+## Force coordinates to numeric
+gps$Latitude  = as.numeric(as.character(gps$Latitude))
+gps$Longitude = as.numeric(as.character(gps$Longitude))
 
-gps = gps[gps$Time > make.time(2000),]
+## Convert NMEA DegMin.m format to Decimal Degrees
+gps$Latitude  = floor(gps$Latitude / 100) + (gps$Latitude - floor(gps$Latitude / 100) * 100) / 60
+gps$Longitude = -1 * (floor(gps$Longitude / 100) + (gps$Longitude - floor(gps$Longitude / 100) * 100) / 60)
 
+## Keep ONLY Time, Latitude, and Longitude
+gps = gps[, c('Time', 'Latitude', 'Longitude')]
+
+## Save updated file
 saveRDS(gps, file = paste0(directories$save, 'gps.rds'))
 
 
@@ -66,9 +92,10 @@ colnames(ctd) = c('Time', 'Temperature', 'Conductivity', 'Pressure', 'Depth', 'S
 
 
 ## Calculate
-ctd$SigmaTheta = calc.sigma.theta(S = ctd$Salinity, Tmp = ctd$Temperature, P = ctd$Pressure, verbose = F)
-
-ctd = ctd[ctd$Time > make.time(2000),]
+ctd$SigmaTheta = oce::swSigmaTheta(salinity = ctd$Salinity, 
+                                   temperature = ctd$Temperature, 
+                                   pressure = ctd$Pressure)
+ctd = ctd[ctd$Time > make_time_utc(2000),]
 saveRDS(ctd, file = paste0(directories$save, 'ctd1.rds'))
 
 
@@ -80,13 +107,14 @@ ctd.files = list.files(directories$ctd2,
                        recursive = T)
 
 ctd = load.dpi.files(ctd.files)
-ctd = ctd[ctd$Time > make.time(2000),]
+ctd = ctd[ctd$Time > make_time_utc(2000),]
 
 colnames(ctd) = c('Time', 'Temperature2', 'Conductivity2', 'Pressure2', 'Depth2', 'Salinity2', 'Sound.Velocity2')
 
 ## Calculate
-ctd$SigmaTheta2 = calc.sigma.theta(S = ctd$Salinity2, Tmp = ctd$Temperature2, P = ctd$Pressure2, verbose = F)
-
+ctd$SigmaTheta = oce::swSigmaTheta(salinity = ctd$Salinity, 
+                                   temperature = ctd$Temperature, 
+                                   pressure = ctd$Pressure)
 saveRDS(ctd, file = paste0(directories$save, 'ctd2.rds'))
 
 
@@ -102,7 +130,7 @@ ad = load.dpi.files(ad.files)
 
 colnames(ad) = c('Time', 'Oxygen', 'PAR', 'pH', 'REDOX', 'Checksum', 'checksum2')
 
-ad = ad[ad$Time > make.time(2000),]
+ad = ad[ad$Time > make_time_utc(2000),]
 saveRDS(ad, file = paste0(directories$save, 'analog.rds'))
 
 
@@ -126,7 +154,7 @@ fl$Chl = (fl$Chl - 49) * 0.0121
 fl$FDOM = (fl$FDOM - 50) * 0.0914
 fl$Phycocyanin = (fl$Phycocyanin - 46) * 0.0422
 
-fl = fl[fl$Time > make.time(2000),]
+fl = fl[fl$Time > make_time_utc(2000),]
 saveRDS(fl, file = paste0(directories$save, 'fluorometer1.rds'))
 
 
@@ -150,7 +178,7 @@ fl$S470 = (fl$S470 - 35) * 0.00001181
 fl$S532 = (fl$S532 - 50) * 0.000008216
 fl$S650 = (fl$S650 - 50) * 0.00000411
 
-fl = fl[fl$Time > make.time(2000),]
+fl = fl[fl$Time > make_time_utc(2000),]
 saveRDS(fl, file = paste0(directories$save, 'fluorometer2.rds'))
 
 
@@ -164,7 +192,7 @@ eng.files = list.files(directories$eng,
 eng = load.dpi.files(eng.files)
 
 colnames(eng) = c('Time', 'AccelerationX', 'AccelerationY', 'AccelerationZ', 'Roll', 'Pitch', 'T')
-eng = eng[eng$Time > make.time(2000),]
+eng = eng[eng$Time > make_time_utc(2000),]
 saveRDS(eng, file = paste0(directories$save, 'engineering.rds'))
 
 
@@ -200,7 +228,7 @@ suna.files = list.files(directories$suna,
                        pattern = '*.sbslog',
                        recursive = T)
 suna = load.suna.files(suna.files, skip = 15, min.size = 250000)
-suna = suna[suna$Time > make.time(2022),]
+suna = suna[suna$Time > make_time_utc(2022),]
 suna$Time = suna$Time - 86400
 
 saveRDS(suna, file = paste0(directories$save, 'suna.rds'))

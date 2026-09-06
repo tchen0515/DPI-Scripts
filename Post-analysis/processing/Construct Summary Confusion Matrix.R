@@ -1,5 +1,7 @@
-
-confusion = read.csv('../../model/thesis121v3 confusion.csv')
+## summarize the confusion matrix , combining same taxonomic category
+setwd('F:/DPI/')
+modeln='DNet121cce1'
+confusion = read.csv(paste0('model/',modeln,' confusion.csv')) # product of train.py
 categories = confusion[,1]
 confusion = confusion[,-1]
 
@@ -25,4 +27,4 @@ for (i in 1:nrow(sumconfusion)) {
 rownames(sumconfusion) = major
 colnames(sumconfusion) = major
 
-write.csv(sumconfusion, file = '../../model/thesis121v1 sumconfusion.csv')
+write.csv(sumconfusion, file = paste0('model/',modeln,' sumconfusion.csv'))

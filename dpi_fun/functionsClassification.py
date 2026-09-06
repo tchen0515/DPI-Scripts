@@ -70,6 +70,21 @@ def mainClassifcation(config, logger):
             logger.info("Unable to disable GPU device. Exception thrown, continuing.")
             pass
     
+    ## === BEGIN DYNAMIC MEMORY GROWTH MODIFICATION ===
+    #gpus = tf.config.experimental.list_physical_devices('GPU')
+    #if gpus:
+    #    try:
+    #        # Set memory growth to True: only allocate memory as needed.
+    #        for gpu in gpus:
+    #            tf.config.experimental.set_memory_growth(gpu, True)
+    #        logger.info("Enabled TensorFlow dynamic GPU memory growth.")
+    #    except RuntimeError as e:
+    #        # RuntimeError will be thrown if memory growth settings are attempted
+    #        # after the GPU has already been initialized (which shouldn't happen here).
+    #        logger.error(f"Failed to set memory growth: {e}")
+    #        pass
+    ## === END DYNAMIC MEMORY GROWTH MODIFICATION ===
+    
     # Load model
     timer['model_load_start'] = time()
     model, sidecar = loadModel(config, logger)

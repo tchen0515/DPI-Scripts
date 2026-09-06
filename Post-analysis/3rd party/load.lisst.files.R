@@ -15,21 +15,27 @@ load.lisst.files = function(files, min.size = 1024, verbose = T) {
   message(' Identified ', sum(file$keep), ' file(s) of valid size and ', sum(!file$keep), ' file(s) of invalid size.')
   files = file$files[file$keep]
   
+  if (length(files) == 0) {
+    stop("No valid files found.")
+  }
+  
   ## Load in first file.
   message(' Attempting to load file 1... ', appendLF = F)
   dat = data.table::fread(files[1], fill = T, verbose = F, showProgress = F)
   message('Done.')
   
-  ## Read in rest of data
-  for (i in 2:length(files)) {
-    message(' Attempting to load file ', i, '... ', appendLF = F)
-    temp = data.table::fread(files[i], fill = T, verbose = F, showProgress = F)
-    
-    if (ncol(temp) != ncol(dat)) {
-      message('Invalid number of columns (', ncol(temp), ' vs ', ncol(dat), '), skipping.')
-    } else {
-      dat = rbind.data.frame(dat, temp, fill = T)
-      message('Done.')
+  ## Read in rest of data (FIX: Added single-file guard)
+  if (length(files) > 1) {
+    for (i in 2:length(files)) {
+      message(' Attempting to load file ', i, '... ', appendLF = F)
+      temp = data.table::fread(files[i], fill = T, verbose = F, showProgress = F)
+      
+      if (ncol(temp) != ncol(dat)) {
+        message('Invalid number of columns (', ncol(temp), ' vs ', ncol(dat), '), skipping.')
+      } else {
+        dat = rbind.data.frame(dat, temp, fill = T)
+        message('Done.')
+      }
     }
   }
   
@@ -52,8 +58,8 @@ load.lisst.files = function(files, min.size = 1024, verbose = T) {
                     'Analog.3',
                     'Transmission', 'Attenuation')
   
-  ## Make and sort by time
-  dat$Time = TheSource::make.time(dat$Year, dat$Month, dat$Day, dat$Hour, dat$Minute, dat$Seconds, tz = 'GMT')
+  ## Make and sort by time (Base R vectorized ISOdatetime)
+  dat$Time = ISOdatetime(dat$Year, dat$Month, dat$Day, dat$Hour, dat$Minute, dat$Seconds, tz = 'GMT')
   dat = dat[order(dat$Time),]
   
   message('Finished.')

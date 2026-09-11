@@ -1,3 +1,11 @@
+### plot maps & env profiles (Section plot)
+
+## -----------------------------------------------------------------------------
+## SETUP & CONFIGURATION (Only change dataset_name when switching datasets)
+## -----------------------------------------------------------------------------
+dataset_name = "cycle1_day2"
+root.dir = 'F:/DPI/DPI-sensor/P2402-sensor/sensor_data/cycle1_day2/'
+
 #library(devtools)
 #devtools::install_github("tbrycekelly/TheSource", dependencies = FALSE) # The package's repo
 #library(TheSource)
@@ -24,9 +32,6 @@ for (file in function_files) {
     message("Skipping script with top-level code: ", basename(file))
   })
 }
-
-## Setup
-root.dir = 'F:/DPI/DPI-sensor/P2402-sensor/sensor_data/cycle1_day1/'
 
 ## Default directories
 directories = list(

@@ -4,10 +4,9 @@ library(maps)
 library(mgcv)
 library(fields)
 
+## SETUP & CONFIGURATION (SDhould be done in Sensor A.R)
 ## -----------------------------------------------------------------------------
-## SETUP & CONFIGURATION (Only change dataset_name when switching datasets)
-## -----------------------------------------------------------------------------
-dataset_name = "cycle1_day1"
+#dataset_name = "cycle1_day2"
 
 # Automatically build directory paths from dataset_name if root.dir isn't pre-loaded
 if (!exists("root.dir")) {

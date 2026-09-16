@@ -5,7 +5,7 @@ source('processing/mid level utilities.R')
 
 library(data.table)
 
-#### User input: (muted since they aer defined in ...at once.R)
+#### User input: (muted since they are defined in ...at once.R)
 #outputDir = 'F:/DPI/export/RR2402Cam1c4d1_DenseNet121S1/'
 nMax = 1000 
 pMin = 0.0 
@@ -140,4 +140,6 @@ for (folder in list.dirs(outputDir)[-1]) {
   }
 }
 
-zip(outputDir, zipfile = paste0(outputDir, '.zip'))
+## replace syntax with Linux's native system
+# zip(outputDir, zipfile = paste0(outputDir, '.zip'))
+system(sprintf("zip -r -q '%s.zip' '%s'", outputDir, outputDir))

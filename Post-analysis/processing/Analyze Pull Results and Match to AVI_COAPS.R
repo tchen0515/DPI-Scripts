@@ -1,17 +1,34 @@
-# last modified: 2026/07/23
-setwd('/unity/g1/tchen/DPI/DPI-Scripts/Post-analysis/Post-analysis/')
+# last modified: 2026/09/14
+
+# --- Working Directory ---
+setwd('/unity/g1/tchen/DPI/DPI-Scripts/Post-analysis/')
 source('processing/low level utilities.R')
 source('processing/mid level utilities.R')
 
 library(data.table)
-library(magick) # Required for fast image metadata reading
+# Ensure standalone runs also observe the 30 CPU cap
+data.table::setDTthreads(threads = 28)
+library(magick) 
 
-#### User input: (muted since they are defined in ...at once.R)
-#outputDir = 'F:/DPI/export/RR2402Cam1c4d1_DenseNet121S1/'
-#camera = 'RR2402-camera1'
-#transect = 'cycle4_day1'
-#segmentationName = 'REG'
-#modelName = 'DenseNet121-S1'
+# --- DUAL-COMPATIBLE INPUT HANDLING ---
+args <- commandArgs(trailingOnly = TRUE)
+
+if (length(args) == 4) {
+  # Scenario A: Running standalone via terminal
+  camera           <- args[1]
+  transect         <- args[2]
+  segmentationName <- args[3]
+  modelName        <- args[4]
+  outputDir        <- paste0('/unity/g1/tchen/DPI/export/', camera, transect, '_', modelName, '/')
+  message(sprintf("Standalone mode: Camera=%s | Transect=%s", camera, transect))
+  
+} else if (exists("camera") && exists("transect") && exists("segmentationName") && exists("outputDir")) {
+  # Scenario B: Sourced from master script
+  message(sprintf("Master script mode: Inheriting Camera=%s | Transect=%s", camera, transect))
+  
+} else {
+  stop("ERROR: Missing variables. Either run via master script or provide 4 CLI arguments.")
+}
 
 #### Autopilot from here:
 
@@ -31,8 +48,13 @@ if (length(sourceFiles$segmentationFiles) == 0) {
 sourceFiles$classificationFiles = list.files(sourceFiles$classificationPath, pattern = 'prediction.csv')
 
 ## Load in list of all files in directory:
-roiFiles = list.files(outputDir, pattern = '.png', full.names = T, recursive = T)
+roiFiles = list.files(outputDir, pattern = '\\.png$', full.names = TRUE, recursive = TRUE)
 message('Found ', length(roiFiles), ' image files.')
+
+# Stop early if no images are found
+if (length(roiFiles) == 0) {
+  stop(sprintf("ERROR: No .png files found in '%s'.", outputDir))
+}
 
 # Create the base dataframe
 roiIndex = data.frame(path = roiFiles,
@@ -40,94 +62,74 @@ roiIndex = data.frame(path = roiFiles,
                       transect = transect,
                       segmentationName = NA,
                       modelName = modelName,
-                      aviFile = NA,
+                      aviFile = NA_character_,
                       time = NA)
 
-# --- 1. VECTORIZED STRING MANIPULATION ---
-# Clean paths
-#relative_paths = gsub(outputDir, '', roiIndex$path)
-#path_splits = strsplit(relative_paths, split = '/')
-
-# Extract class (second to last element)
-#roiIndex$class = sapply(path_splits, function(x) { if(length(x) > 1) x[length(x)-1] else NA })
-
-# Extract filename
-#filenames_raw = sapply(path_splits, function(x) { if(length(x) > 1) x[length(x)] else NA })
-#filenames_split = strsplit(filenames_raw, split = ' ')
-#roiIndex$filename = sapply(filenames_split, function(x) { if(length(x) > 1) gsub('.png', '', x[2]) else NA })
-
-# Extract frame and roi
-#frame_roi = strsplit(roiIndex$filename, split = '-')
-#roiIndex$frame = as.numeric(sapply(frame_roi, function(x) { if(length(x) > 1) x[1] else NA }))
-#roiIndex$roi = as.numeric(sapply(frame_roi, function(x) { if(length(x) > 1) x[2] else NA }))
-
-# --- 2. FAST IMAGE DIMENSION READING ---
-#message('Reading image dimensions...')
-# image_info only reads the header, skipping the heavy pixel loading
-#img_metadata = magick::image_info(magick::image_read(roiIndex$path))
-#roiIndex$width = img_metadata$width
-#roiIndex$height = img_metadata$height
-
-# --- 3. FAST SEGMENTATION FILE LOADING ---
-#stat_files = list.files(sourceFiles$segmentationPath, pattern = 'statistics.csv', full.names = TRUE, recursive = TRUE)
-#message('Loading ', length(stat_files), ' statistics files...')
-
-#stat_list = lapply(stat_files, function(f) {
-#  tmp = loadMeasurement(f)
-#  if(is.null(tmp) || nrow(tmp) == 0) return(NULL)
-# tmp$size = apply(tmp[,c('w','h')], 1, max)
-#  return(tmp[tmp$size >= min(roiIndex$width, na.rm = T), ])
-#})
-
-#statistics = as.data.frame(rbindlist(stat_list[!sapply(stat_list, is.null)]))
-
-# --- 4. INSTANT LEFT JOIN ---
-#names(statistics)[names(statistics) == "crop"] <- "roi"
-#roiIndex = merge(
-#  x = roiIndex, 
-#  y = statistics[, c("frame", "roi", "size", "filename")], 
-#  by.x = c("frame", "roi", "width"), 
-#  by.y = c("frame", "roi", "size"), 
-#  all.x = TRUE
-#)
-
-#roiIndex$aviFile = roiIndex$filename.y
-#roiIndex$filename.y = NULL 
-#names(roiIndex)[names(roiIndex) == "filename.x"] <- "filename" 
 # --- 1. FAST VECTORIZED STRING PARSING ---
 setDT(roiIndex)
 
 relative_paths <- gsub(outputDir, '', roiIndex$path)
 path_parts <- tstrsplit(relative_paths, "/", fixed = TRUE)
 
-# Extract class folder
-roiIndex[, class := path_parts[[length(path_parts) - 1]]]
+# Safe-guard subfolder indexing
+target_idx <- max(1, length(path_parts) - 1)
+roiIndex[, class := path_parts[[target_idx]]]
 
-# Extract clean filename and split frame/roi
+# Extract clean filename
 raw_filenames <- basename(roiIndex$path)
-clean_names <- sub("^\\[[0-9.]+\\] ", "", raw_filenames) # Removes pMax tag like [0.95]
+clean_names <- sub("^\\[[0-9.]+\\] ", "", raw_filenames) 
 clean_names <- sub("\\.png$", "", clean_names)
 
 roiIndex[, filename := clean_names]
 
-frame_roi <- tstrsplit(clean_names, "-", fixed = TRUE)
-roiIndex[, frame := as.numeric(frame_roi[[1]])]
-roiIndex[, roi := as.numeric(frame_roi[[2]])]
+# Extract frame and roi from the end of the string using regex
+# \\1 captures the specific group of digits
+roiIndex[, frame := as.numeric(sub(".*-([0-9]+)-[0-9]+$", "\\1", clean_names))]
+roiIndex[, roi := as.numeric(sub(".*-[0-9]+-([0-9]+)$", "\\1", clean_names))]
 
-# --- 2. FAST SEGMENTATION FILE LOADING (NO DISK READ FOR PNGs) ---
-stat_files = list.files(sourceFiles$segmentationPath, pattern = 'statistics.csv', full.names = TRUE, recursive = TRUE)
-message('Loading ', length(stat_files), ' statistics files...')
+# --- 2. FAST SEGMENTATION FILE LOADING WITH REAL-TIME PROGRESS ---
+# Search recursively for any file ending in 'statistics.csv' (handles subfolders & spaces)
+stat_files = list.files(sourceFiles$segmentationPath, 
+                        pattern = 'statistics.*\\.csv$', 
+                        full.names = TRUE, 
+                        recursive = TRUE)
 
-stat_list = lapply(stat_files, function(f) {
+n_files = length(stat_files)
+message('Loading ', n_files, ' statistics files...')
+stat_list = vector("list", n_files)
+start_time = Sys.time()
+
+for (i in seq_along(stat_files)) {
+  f = stat_files[i]
   tmp = loadMeasurement(f)
-  if(is.null(tmp) || nrow(tmp) == 0) return(NULL)
-  return(tmp)
-})
+  
+  if (!is.null(tmp) && nrow(tmp) > 0) {
+    stat_list[[i]] = tmp
+  }
+  
+  # Calculate real-time elapsed and remaining time
+  elapsed_sec = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  avg_per_file = elapsed_sec / i
+  remaining_sec = avg_per_file * (n_files - i)
+  remaining_min = round(remaining_sec / 60)
+  
+  message(sprintf("Finished file %d out of %d.     Elapsed: %d sec     Remaining: %d min", 
+                  i, n_files, round(elapsed_sec), remaining_min))
+}
 
 statistics = rbindlist(stat_list[!sapply(stat_list, is.null)], fill = TRUE)
 
 # --- 3. INSTANT DATA.TABLE JOIN ---
 setnames(statistics, "crop", "roi", skip_absent = TRUE)
+
+# Validate that the required columns actually exist in the loaded CSVs
+required_cols <- c("frame", "roi", "filename")
+missing_cols <- setdiff(required_cols, names(statistics))
+
+if (length(missing_cols) > 0) {
+  stop(sprintf("\nERROR: Join failed! The statistics.csv files are missing required column(s): %s. Please check the raw CSV files for formatting errors.", 
+               paste(missing_cols, collapse = ", ")))
+}
 
 # Join on frame and roi without opening PNG files
 roiIndex[statistics, aviFile := i.filename, on = .(frame, roi)]

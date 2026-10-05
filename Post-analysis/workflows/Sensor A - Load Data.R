@@ -3,8 +3,8 @@
 ## -----------------------------------------------------------------------------
 ## SETUP & CONFIGURATION (Only change dataset_name when switching datasets)
 ## -----------------------------------------------------------------------------
-dataset_name = "cycle1_day2"
-root.dir = 'F:/DPI/DPI-sensor/P2402-sensor/sensor_data/cycle1_day2/'
+dataset_name = "cycle3_day1"
+root.dir = 'F:/DPI/DPI-sensor/P2402-sensor/sensor_data/cycle3_day1/'
 
 #library(devtools)
 #devtools::install_github("tbrycekelly/TheSource", dependencies = FALSE) # The package's repo
@@ -229,11 +229,48 @@ saveRDS(acs, file = paste0(directories$save, 'acs.rds'))
 
 #### SUNA
 suna.files = list.files(directories$suna,
-                       full.names = T,
-                       pattern = '*.sbslog',
-                       recursive = T)
-suna = load.suna.files(suna.files, skip = 15, min.size = 250000)
-suna = suna[suna$Time > make_time_utc(2022),]
-suna$Time = suna$Time - 86400
+                        pattern = "\\.(csv|txt|dat)$", 
+                        ignore.case = TRUE,
+                        full.names = TRUE)
 
-saveRDS(suna, file = paste0(directories$save, 'suna.rds'))
+# 1. Separate CSV files from raw text/dat files
+csv_files = suna.files[grepl("\\.csv$", suna.files, ignore.case = TRUE)]
+raw_files = suna.files[!grepl("\\.csv$", suna.files, ignore.case = TRUE)]
+
+suna_list = list()
+
+# 2. Process raw text/dat SUNA files with original loader (skip = 15, size check)
+if (length(raw_files) > 0) {
+  valid_raw = raw_files[file.info(raw_files)$size >= 250000]
+  if (length(valid_raw) > 0) {
+    suna_list[["raw"]] = load.suna.files(valid_raw, skip = 15)
+  }
+}
+
+# 3. Process CSV files dynamically (auto-detects delimiter, no skip required)
+if (length(csv_files) > 0) {
+  csv_data = lapply(csv_files, function(f) {
+    df = as.data.frame(data.table::fread(f))
+    
+    # Ensure Time column is converted to POSIXct UTC if imported as character/numeric
+    if ("Time" %in% names(df) && !inherits(df$Time, "POSIXt")) {
+      df$Time = as.POSIXct(df$Time, tz = "UTC")
+    }
+    return(df)
+  })
+  suna_list[["csv"]] = dplyr::bind_rows(csv_data)
+}
+
+# 4. Combine datasets
+suna = dplyr::bind_rows(suna_list)
+
+# 5. Apply time threshold and 1-day offset
+if (nrow(suna) > 0) {
+  suna = suna[suna$Time > make_time_utc(2022), ]
+  suna$Time = suna$Time - 86400
+  
+  saveRDS(suna, file = paste0(directories$save, 'suna.rds'))
+  cat("Successfully saved SUNA data with", nrow(suna), "records.\n")
+} else {
+  warning("No SUNA data met the filtering criteria.")
+}

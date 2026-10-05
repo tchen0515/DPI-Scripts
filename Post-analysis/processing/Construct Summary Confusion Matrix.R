@@ -1,6 +1,6 @@
 ## summarize the confusion matrix , combining same taxonomic category
 setwd('F:/DPI/')
-modeln='DNet121cce1'
+modeln='CNXcce3'
 confusion = read.csv(paste0('model/',modeln,' confusion.csv')) # product of train.py
 categories = confusion[,1]
 confusion = confusion[,-1]

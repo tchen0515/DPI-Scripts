@@ -1,14 +1,14 @@
-# last modified: 2026/07/23
+# last modified: 2026/09/25
 setwd('/unity/g1/tchen/DPI/DPI-Scripts/Post-analysis/')
 source('processing/low level utilities.R')
 source('processing/mid level utilities.R')
 
 library(data.table)
 
-#### User input: (muted since they are defined in ...at once.R)
+#### User input: (muted since they aer defined in ...at once.R)
 #outputDir = 'F:/DPI/export/RR2402Cam1c4d1_DenseNet121S1/'
 nMax = 1000 
-pMin = 0.0 
+pMin = 0.2 
 
 #camera = 'RR2402-camera1'
 #transect = 'cycle4_day1'
@@ -52,6 +52,14 @@ if (!dir.exists(outputDir)) {
   dir.create(outputDir, recursive = T)
 }
 
+# --- ISOLATED RAM DISK SETUP ---
+# Create a unique temp folder in RAM for THIS specific process ID
+shm_base = sprintf("/dev/shm/tchen_%s_%s_pid%d", camera, transect, Sys.getpid())
+dir.create(shm_base, recursive = TRUE, showWarnings = FALSE)
+
+# Guarantee cleanup of the RAM disk folder even if the script crashes
+on.exit(unlink(shm_base, recursive = TRUE), add = TRUE)
+
 results = list()
 initTime = Sys.time()
 
@@ -86,7 +94,9 @@ for (i in 1:length(sourceFiles$classificationFiles)) {
   
   # --- 3. FAST UNZIP & INSTANT MOVE ---
   zipName = paste0(sourceFiles$segmentationPath, gsub(' prediction.csv', '.zip', sourceFiles$classificationFiles[i]))
-  extractName = paste0(sourceFiles$segmentationPath, gsub(' prediction.csv', '/', sourceFiles$classificationFiles[i]))
+  
+  # Point to the isolated RAM disk folder for this specific loop iteration
+  extractName = paste0(shm_base, '/extract_', i, '/')
   
   files_to_extract = predictions[[1]][valid_rows]
   
@@ -95,9 +105,9 @@ for (i in 1:length(sourceFiles$classificationFiles)) {
     if (!dir.exists(class_dir)) dir.create(class_dir, recursive = T)
   }
   
-  # FAST UNZIP: Extract everything at once (avoids the O(N*M) search penalty)
+  # FAST UNZIP: Extract everything at once directly into RAM
   dir.create(extractName, recursive = TRUE, showWarnings = FALSE)
-  system(sprintf('tar -xf "%s" -C "%s"', zipName, extractName))
+  system(sprintf("unzip -q -o '%s' -d '%s'", zipName, extractName))
   
   # VECTORIZED FORMATTING: Bypass the slow roundNumber() loop
   formatted_pmax = sprintf("%.2f", pmax[valid_rows])
@@ -105,8 +115,8 @@ for (i in 1:length(sourceFiles$classificationFiles)) {
   # Build destination filenames
   dest_files = paste0(outputDir, '/', classes[pIndex[valid_rows]], '/[', formatted_pmax, '] ', gsub('.png', '', files_to_extract), '.png')
   
-  # INSTANT MOVE: file.rename is exponentially faster than file.copy()
-  file.rename(from = paste0(extractName, '/', files_to_extract), to = dest_files)
+  # INSTANT MOVE: file.rename does not work
+  file.copy(from = paste0(extractName, '/', files_to_extract), to = dest_files, overwrite = TRUE)
   
   # Clean up the unwanted files
   unlink(extractName, recursive = T)

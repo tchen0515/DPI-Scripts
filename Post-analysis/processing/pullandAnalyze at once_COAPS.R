@@ -36,14 +36,11 @@ outputDir = paste0('/unity/g1/tchen/DPI/export/',camera,transect,'_',modelName,'
 library(parallel)
 library(data.table)
 
-# Calculate 80% CPU cap (matching Python segmentation rules)
+# Cap CPU usage to 28 cores maximum (STRICT COAPS POLICY)
 total_cores <- parallel::detectCores(logical = TRUE)
-cpu_cap <- max(1, floor(total_cores * 0.8))
+cpu_cap <- min(28, floor(total_cores * 0.8))
 
-# Cap data.table multi-threading
 data.table::setDTthreads(threads = cpu_cap)
-
-# Cap general parallel processes and OpenMP threads
 Sys.setenv(OMP_NUM_THREADS = cpu_cap)
 Sys.setenv(MC_CORES = cpu_cap)
 

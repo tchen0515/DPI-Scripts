@@ -7,7 +7,7 @@ Usage:
 License:
     MIT License
 
-    Copyright (c) 2023 Thomas Kelly
+    Copyright (c) 2023 Thomas Kelly, modified by Tz-Chian Chen 2026
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -29,21 +29,28 @@ License:
 """
 
 import json
+import importlib
+import builtins
 from dpi_fun import *
-import tensorflow as tf # <-- ADD THIS HERE (Around Row 35)
 
 if __name__ == "__main__":
+    # 1. Read the config file first
     with open('config.json', 'r') as f:
         config = json.load(f)
 
-    logger = setup_logger('Training (main)', config)
+    # 2. Get the model_type from the config (e.g., "DenseNet121" or "ConvNeXt")
+    model_type = config['training']['model_type']
     
-    # <-- ADD THIS ENTIRE BLOCK HERE (Around Row 41) -->
-    if config['training'].get('use_mixed_precision', False):
-        logger.info("Enabling Mixed Precision (float16)")
-        tf.keras.mixed_precision.set_global_policy('mixed_float16')
-    else:
-        logger.info("Using standard 32-bit precision")
-    # <------------------------------------------------>
+    print(f"Dynamically loading architecture: dpi_fun.{model_type}")
+    
+    # 3. Dynamically import the chosen architecture file
+    model_module = importlib.import_module(f'dpi_fun.{model_type}')
+    
+    # 4. Inject the Model function into Python's built-in namespace 
+    # This ensures your functionsTrain.py script can "see" the Model() function
+    # exactly as it did when you were using 'from dpi_fun.DenseNet121 import *'
+    builtins.Model = model_module.Model
 
+    # 5. Proceed with your existing pipeline
+    logger = setup_logger('Training (main)', config)
     mainTrain(config, logger)

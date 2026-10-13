@@ -88,7 +88,6 @@ def train_model(model, config, train_ds, val_ds, devices):
         verbose=1
     )
 
-<<<<<<< Updated upstream
     #with tf.device(devices):
     history = model.fit(
         train_ds,
@@ -99,15 +98,6 @@ def train_model(model, config, train_ds, val_ds, devices):
         # Added missing callbacks to the training loop
         callbacks=[csv_logger, checkpoint_callback, lr_scheduler, early_stopping]
     )
-=======
-    with tf.device('/GPU:0'):
-        history = model.fit(train_ds,
-                        validation_data=val_ds,
-                        epochs=int(config['training']['stop'])-int(config['training']['start']),
-                        initial_epoch=int(config['training']['start']),
-                        batch_size = int(config['training']['batchsize']),
-                        callbacks=[csv_logger])
->>>>>>> Stashed changes
     
     return(model, history)
 

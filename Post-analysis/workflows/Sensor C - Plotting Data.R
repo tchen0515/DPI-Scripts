@@ -4,7 +4,7 @@ library(maps)
 library(mgcv)
 library(fields)
 
-## SETUP & CONFIGURATION (SDhould be done in Sensor A.R)
+## SETUP & CONFIGURATION (Should be done in Sensor A.R)
 ## -----------------------------------------------------------------------------
 #dataset_name = "cycle1_day2"
 
@@ -24,7 +24,6 @@ world_map = map_data("world")
 map_pdf_path = paste0(save.dir, dataset_name, ' Maps.pdf')
 pdf(map_pdf_path, width = 8, height = 6)
 
-# 1. Combine all transects into a single dataframe to prevent ggplot loop errors
 all_transects_list = lapply(seq_along(transects), function(i) {
   df = transects[[i]]
   df$Transect = as.factor(i)
@@ -32,16 +31,13 @@ all_transects_list = lapply(seq_along(transects), function(i) {
 })
 all_transects = do.call(rbind, all_transects_list)
 
-# 2. Dynamically calculate geographic bounding box from actual data limits
 lon_min = min(all_transects$Longitude, na.rm = TRUE) - 0.5
 lon_max = max(all_transects$Longitude, na.rm = TRUE) + 0.5
 lat_min = min(all_transects$Latitude, na.rm = TRUE) - 0.5
 lat_max = max(all_transects$Latitude, na.rm = TRUE) + 0.5
 
-# Calculate midpoint coordinates for transect labels
 transect_labels = aggregate(cbind(Longitude, Latitude) ~ Transect, data = all_transects, FUN = mean, na.rm = TRUE)
 
-# 3. Overview Map (All Transects)
 p_all = ggplot() +
   geom_polygon(data = world_map, aes(x = long, y = lat, group = group), fill = "antiquewhite", color = "grey50") +
   geom_path(data = all_transects, aes(x = Longitude, y = Latitude, color = Transect), linewidth = 1.2) +
@@ -54,7 +50,6 @@ p_all = ggplot() +
 
 print(p_all)
 
-# 4. Individual Transect Maps
 for (i in seq_along(transects)) {
   df_i = all_transects[all_transects$Transect == as.character(i), ]
   label_i = transect_labels[transect_labels$Transect == as.character(i), ]
@@ -86,15 +81,20 @@ for (i in seq_along(transects)) {
   df_i = transects[[i]]
   
   for (j in seq_len(ncol(df_i))) {
-    vals = df_i[[j]]
+    vals = suppressWarnings(as.numeric(df_i[[j]]))
     var_name = names(df_i)[j]
     
-    if (is.numeric(vals) && !all(is.na(vals)) && !var_name %in% c("Time", "Distance", "Depth")) {
-      val_range = range(vals, na.rm = TRUE)
-      val_cut = cut(vals, breaks = 100)
+    finite_vals = vals[is.finite(vals)]
+    
+    if (length(finite_vals) > 0 && !var_name %in% c("Time", "Distance", "Depth")) {
+      val_range = range(finite_vals)
+      if (val_range[1] == val_range[2]) {
+        val_range = val_range + c(-0.01, 0.01)
+      }
+      
+      val_cut = cut(vals, breaks = seq(val_range[1], val_range[2], length.out = 101), include.lowest = TRUE)
       col_vec = viridis::inferno(100)[as.numeric(val_cut)]
       
-      # Expand right margin to make room for color bar legend
       par(mar = c(4, 4, 3, 5))
       
       plot(df_i$Latitude, df_i$Depth,
@@ -104,7 +104,6 @@ for (i in seq_along(transects)) {
            xlab = "Latitude", ylab = "Depth (m)",
            main = paste(var_name, "- Transect", i))
       
-      # Draw side color bar legend
       fields::image.plot(legend.only = TRUE, 
                          zlim = val_range, 
                          col = viridis::inferno(100), 
@@ -119,17 +118,47 @@ for (i in seq_along(transects)) {
 ## 3. BUILD SECTIONS (GAM Interpolation)
 ## -----------------------------------------------------------------------------
 build_section_gam = function(df, fields, nx = 150, ny = 200, ylim = c(0, 200)) {
-  grid_x = seq(min(df$Distance, na.rm = TRUE), max(df$Distance, na.rm = TRUE), length.out = nx)
-  grid_y = seq(ylim[1], ylim[2], length.out = ny)
+  dist_vec = suppressWarnings(as.numeric(df$Distance))
+  depth_vec = suppressWarnings(as.numeric(df$Depth))
+  
+  valid_dist = dist_vec[is.finite(dist_vec)]
+  
+  if (length(valid_dist) < 2 || max(valid_dist) <= min(valid_dist)) {
+    x_min = 0
+    x_max = 1
+  } else {
+    x_min = min(valid_dist)
+    x_max = max(valid_dist)
+  }
+  
+  grid_x = seq(x_min, x_max, length.out = nx)
+  grid_y = seq(min(ylim), max(ylim), length.out = ny)
   pred_grid = expand.grid(Distance = grid_x, Depth = grid_y)
   
   grid_list = list()
   
   for (f in fields) {
-    valid = !is.na(df$Distance) & !is.na(df$Depth) & !is.na(df[[f]])
-    if (sum(valid) >= 10) {
-      mod = mgcv::gam(df[[f]][valid] ~ s(Distance, Depth, k = min(30, sum(valid) - 1)), data = df[valid, ])
-      grid_mat = matrix(predict(mod, newdata = pred_grid), nrow = nx, ncol = ny)
+    if (f %in% names(df)) {
+      vals = suppressWarnings(as.numeric(df[[f]]))
+      valid = is.finite(dist_vec) & is.finite(depth_vec) & is.finite(vals)
+      
+      if (sum(valid) >= 10) {
+        fit_df = data.frame(Distance = dist_vec[valid], Depth = depth_vec[valid], Var = vals[valid])
+        mod = tryCatch({
+          mgcv::gam(Var ~ s(Distance, Depth, k = min(30, sum(valid) - 1)), data = fit_df)
+        }, error = function(e) NULL)
+        
+        if (!is.null(mod)) {
+          preds = predict(mod, newdata = pred_grid)
+          # Replace non-finite GAM predictions (Inf, -Inf, NaN) with NA
+          preds[!is.finite(preds)] = NA
+          grid_mat = matrix(preds, nrow = nx, ncol = ny)
+        } else {
+          grid_mat = matrix(NA, nrow = nx, ncol = ny)
+        }
+      } else {
+        grid_mat = matrix(NA, nrow = nx, ncol = ny)
+      }
     } else {
       grid_mat = matrix(NA, nrow = nx, ncol = ny)
     }
@@ -149,31 +178,102 @@ for (i in seq_along(transects)) {
   section[[i]] = build_section_gam(transects[[i]], fields = fields, ylim = c(0, 200))
 }
 
+
 ## -----------------------------------------------------------------------------
-## 4. PLOT SECTIONS (With Image Color Bar)
+## 4. PLOT SECTIONS (With Image Color Bar & Station Markers)
 ## -----------------------------------------------------------------------------
+
+# 1. Close any hanging background PDF devices from previous crashes
+graphics.off()
+
 for (i in seq_along(section)) {
+  sec = section[[i]]
+  
+  skip_fields = c('Timestamp', 'YearAndDayOfYear', 'HoursOfDay', 'Distance', 
+                  'Depth', 'Time', 'Longitude', 'Latitude', 'AccelerationX', 
+                  'AccelerationY', 'AccelerationZ', 'Roll', 'Pitch')
+  valid_fields = setdiff(names(sec$grid), skip_fields)
+  
+  # Skip generating a PDF entirely if there are no valid fields
+  if (length(valid_fields) == 0) next
+  
   section_pdf_path = paste0(save.dir, dataset_name, ' Section Plots (transect ', i, ').pdf')
   pdf(section_pdf_path, width = 10, height = 8)
-  par(mfrow = c(2, 1))
+  par(mfrow = c(2, 1), mar = c(4, 4, 3, 5))
   
-  sec = section[[i]]
-  for (field_name in names(sec$grid)) {
-    z_mat = sec$grid[[field_name]]
-    if (!all(is.na(z_mat))) {
-      # fields::image.plot automatically includes side color scale
-      fields::image.plot(sec$x, sec$y, z_mat,
-                         ylim = c(200, 0),
-                         col = viridis::inferno(100),
-                         xlab = 'Section Distance (km)',
-                         ylab = 'Depth (m)',
-                         main = paste0(dataset_name, ' - Transect ', i, ' - ', field_name))
+  # Track if we actually draw anything to prevent 0-page corrupted PDFs
+  plots_drawn = 0 
+  
+  for (field_name in valid_fields) {
+    # 2. tryCatch guarantees that if one plot fails, it won't crash dev.off()
+    tryCatch({
+      z_mat = sec$grid[[field_name]]
+      z_mat[!is.finite(z_mat)] = NA
+      z_finite = z_mat[is.finite(z_mat)]
       
-      contour(sec$x, sec$y, z_mat, add = TRUE, col = adjustcolor("white", alpha.f = 0.4))
-    }
+      if (length(z_finite) > 0) {
+        z_range = suppressWarnings(range(z_finite, na.rm = TRUE))
+        
+        if (all(is.finite(z_range))) {
+          if (z_range[1] == z_range[2]) {
+            z_range = z_range + c(-0.01, 0.01)
+          }
+          
+          x_vec = sec$x
+          y_vec = sec$y
+          
+          if (!is.numeric(x_vec) || any(!is.finite(x_vec)) || any(diff(x_vec) <= 0) || length(x_vec) != nrow(z_mat)) {
+            x_vec = seq(0, 1, length.out = nrow(z_mat))
+          }
+          if (!is.numeric(y_vec) || any(!is.finite(y_vec)) || any(diff(y_vec) <= 0) || length(y_vec) != ncol(z_mat)) {
+            y_vec = seq(0, max(sec$y, 200, na.rm = TRUE), length.out = ncol(z_mat))
+          }
+          
+          z_plot = z_mat[, ncol(z_mat):1, drop = FALSE]
+          
+          fields::image.plot(x_vec, y_vec, z_plot,
+                             zlim = z_range,
+                             ylim = range(y_vec),
+                             yaxt = "n",
+                             col = viridis::inferno(100),
+                             xlab = 'Section Distance (km)',
+                             ylab = 'Depth (m)',
+                             main = paste0(dataset_name, ' - Transect ', i, ' - ', field_name))
+          
+          y_ticks = pretty(y_vec)
+          axis(2, at = y_ticks, labels = rev(y_ticks))
+          
+          if (!is.null(sec$stn_x)) {
+            stn_labels = if (!is.null(sec$stn_names)) sec$stn_names else FALSE
+            axis(3, at = sec$stn_x, labels = stn_labels, cex.axis = 0.7)
+          }
+          
+          tryCatch({
+            contour(x_vec, y_vec, z_plot, add = TRUE, col = adjustcolor("white", alpha.f = 0.4))
+          }, error = function(e) NULL)
+          
+          plots_drawn = plots_drawn + 1 # Log success
+          
+        } else {
+          message(paste("Skipping", field_name, "in Transect", i, "- non-finite range."))
+        }
+      } else {
+        message(paste("Skipping", field_name, "in Transect", i, "- no valid data points."))
+      }
+      
+    }, error = function(e) {
+      # If a crash happens, print it but KEEP GOING so the file doesn't lock
+      message(paste("CRASH AVOIDED on", field_name, "in Transect", i, ":", e$message))
+    })
   }
   
-  dev.off()
+  # 3. Prevent 0-page corrupted file errors
+  if (plots_drawn == 0) {
+    plot(1, type = "n", axes = FALSE, xlab = "", ylab = "", main = paste("No Data for Transect", i))
+    text(1, 1, "All variables were skipped or failed to plot.", cex = 1.2)
+  }
+  
+  dev.off() # Always reached safely now
 }
 
 browseURL(paste0(save.dir, dataset_name, ' Section Plots (transect 1).pdf'))

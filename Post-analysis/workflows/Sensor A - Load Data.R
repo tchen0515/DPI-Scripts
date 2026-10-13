@@ -1,4 +1,4 @@
-### plot maps & env profiles (Section plot)
+### Ultimate purpose: plot maps & env profiles (Section plot)
 
 ## -----------------------------------------------------------------------------
 ## SETUP & CONFIGURATION (Only change dataset_name when switching datasets)
@@ -247,30 +247,51 @@ if (length(raw_files) > 0) {
   }
 }
 
-# 3. Process CSV files dynamically (auto-detects delimiter, no skip required)
+# 3. Process CSV files dynamically using YearAndDayOfYear & HoursOfDay
 if (length(csv_files) > 0) {
   csv_data = lapply(csv_files, function(f) {
     df = as.data.frame(data.table::fread(f))
     
-    # Ensure Time column is converted to POSIXct UTC if imported as character/numeric
+    # Check for SUNA specific timestamp columns
+    if (all(c("YearAndDayOfYear", "HoursOfDay") %in% names(df))) {
+      yd_str = as.character(df$YearAndDayOfYear)
+      # Dynamically pick %y%j (5 digits) vs %Y%j (7 digits)
+      date_fmt = if (nchar(yd_str[1]) <= 5) "%y%j" else "%Y%j"
+      
+      base_date = as.POSIXct(as.Date(yd_str, format = date_fmt), tz = "UTC")
+      df$Time = base_date + (df$HoursOfDay * 3600)
+    } else if (!("Time" %in% names(df))) {
+      # Fallback: find any existing time/date/timestamp column
+      time_match = grep("time|date|timestamp", names(df), ignore.case = TRUE, value = TRUE)
+      if (length(time_match) > 0) {
+        names(df)[names(df) == time_match[1]] = "Time"
+      }
+    }
+    
+    # Ensure Time column is POSIXct UTC
     if ("Time" %in% names(df) && !inherits(df$Time, "POSIXt")) {
-      df$Time = as.POSIXct(df$Time, tz = "UTC")
+      if (is.numeric(df$Time)) {
+        df$Time = as.POSIXct(df$Time, origin = "1970-01-01", tz = "UTC")
+      } else {
+        df$Time = as.POSIXct(df$Time, tz = "UTC")
+      }
     }
     return(df)
   })
+  
+  # Bind rows dynamically
   suna_list[["csv"]] = dplyr::bind_rows(csv_data)
 }
 
 # 4. Combine datasets
 suna = dplyr::bind_rows(suna_list)
 
-# 5. Apply time threshold and 1-day offset
-if (nrow(suna) > 0) {
-  suna = suna[suna$Time > make_time_utc(2022), ]
-  suna$Time = suna$Time - 86400
+# 5. Apply time threshold filter
+if (nrow(suna) > 0 && "Time" %in% names(suna)) {
+  suna = suna[!is.na(suna$Time) & suna$Time > make_time_utc(2022), ]
   
   saveRDS(suna, file = paste0(directories$save, 'suna.rds'))
   cat("Successfully saved SUNA data with", nrow(suna), "records.\n")
 } else {
-  warning("No SUNA data met the filtering criteria.")
+  warning("No SUNA data met the filtering criteria, or Time column was missing.")
 }

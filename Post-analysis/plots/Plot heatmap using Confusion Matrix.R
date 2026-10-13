@@ -2,10 +2,10 @@
 library(ggplot2)
 library(reshape2)
 library(pheatmap)
-setwd('D:/OneDrive - Florida State University/DPI/model/')
+setwd('F:/DPI/model/')
 
 # 1. Load data
-modeln='DNet121cce2'
+modeln='RNet50cce3'
 cm_df <- read.csv(paste0(modeln,' sumconfusion.csv')
                   , row.names = 1, check.names = FALSE)
 
@@ -19,7 +19,7 @@ cm_long$Actual <- factor(cm_long$Actual, levels = rev(rownames(cm_mat)))
 cm_long$Predicted <- factor(cm_long$Predicted, levels = colnames(cm_mat))
 
 # 3. Plot Heatmap
-ggplot(cm_long, aes(x = Predicted, y = Actual, fill = Count)) +
+final_fig<-ggplot(cm_long, aes(x = Predicted, y = Actual, fill = Count)) +
   geom_tile(color = "grey90", linewidth = 0.2) +
   scale_fill_viridis_c(option = "magma", trans = "log1p", na.value = "white") +
   coord_fixed() +
@@ -37,3 +37,7 @@ ggplot(cm_long, aes(x = Predicted, y = Actual, fill = Count)) +
     y = "Actual Class",
     fill = "Count (log scale)"
   )
+
+# export the figure
+setwd('F:/DPI/export_fig')
+ggsave(paste0(modeln,".png"), width = 10, height = 8, dpi = 300)

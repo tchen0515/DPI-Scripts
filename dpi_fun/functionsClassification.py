@@ -165,7 +165,7 @@ def runClassifier(r, model, sidecar, config, logger):
     logger.debug(f"Unpacking archive at {config['segmentation_dir'] + os.path.sep + r} to destination {config['segmentation_dir'] + os.path.sep + r2}.")
     shutil.unpack_archive(config['segmentation_dir'] + os.path.sep + r, config['segmentation_dir'] + os.path.sep + r2 + os.path.sep, 'zip')
 
-    ## Load and preprocess images
+# Load and preprocess images (Applying threshold calibration on 11/10/2026)
     images = []
     image_files = []
     valid_extensions = tuple(config['classification']['image_extensions'])
@@ -190,4 +190,28 @@ def runClassifier(r, model, sidecar, config, logger):
     df = pd.DataFrame(predictions, index = image_files) 
     if not config['classification']['feature_space']: # there's no such thing as columns names in feature space...
         df.columns = sidecar['labels']
+        
+        # --- NEW: APPLY CALIBRATED THRESHOLDS ---
+        if 'thresholds' in sidecar:
+            # Extract the thresholds from the sidecar dictionary in the correct order
+            thresholds = np.array([sidecar['thresholds'][label] for label in sidecar['labels']])
+            
+            # Calculate how far past the threshold each prediction is (ratio)
+            ratio = predictions / thresholds
+            passed_threshold = predictions >= thresholds
+            
+            final_labels = []
+            for i in range(len(predictions)):
+                if np.any(passed_threshold[i]):
+                    # If multiple classes pass the threshold, pick the one that exceeded it by the highest margin
+                    best_idx = np.argmax(ratio[i])
+                    final_labels.append(sidecar['labels'][best_idx])
+                else:
+                    # If no probabilities meet their respective class threshold
+                    final_labels.append('Unknown')
+                    
+            # Add the final decision as a new column in your CSV
+            df['Calibrated_Prediction'] = final_labels
+        # ----------------------------------------
+        
     df.to_csv(classification_output_filepath, index = True, header = True, sep = ',')

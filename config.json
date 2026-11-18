@@ -24,7 +24,7 @@
         "cleanup": true
     },
     "classification" : {
-        "model_name" : "DNet121cce2",
+        "model_name" : "DNet121cce3",
         "model_dir" : "../model",
         "analysis_dir" : "../analysis/",
         "scnn_instances" : 1,
@@ -37,15 +37,17 @@
         "from_database" : true
     },
     "training" : {
-        "scnn_dir" : "../training/cce_training_set_202608",
-        "model_name": "DNet121cce2",
-        "model_type": "DenseNet121",
+        "scnn_dir" : "../training/cce_training_202609",
+        "model_name": "RNet101cce4",
+        "model_type": "ResNet101_tune",
         "model_path": "../model",
         "image_extensions" : [".jpg", ".png", ".tif", ".tiff", ".jpeg", ".gif", ".JPG", ".PNG", ".TIF", ".TIFF", ".JPEG", ".GIF"],
         "image_size": 128,
         "start" : 0,
         "stop" : 300,
+        "tau" : 0.45,
         "validationSetRatio" : 0.20,
+        "calibrate_thresholds": true, 
         "batchsize" : 64,   
         "seed": 123,
         "overwrite" : true

@@ -5,7 +5,7 @@ library(pheatmap)
 setwd('F:/DPI/model/')
 
 # 1. Load data
-modeln='RNet50cce3'
+modeln='DNet169cce4'
 cm_df <- read.csv(paste0(modeln,' sumconfusion.csv')
                   , row.names = 1, check.names = FALSE)
 

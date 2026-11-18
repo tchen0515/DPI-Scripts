@@ -16,7 +16,8 @@ import platform
 import sys
 import importlib
 from logging.handlers import TimedRotatingFileHandler
-
+from sklearn.metrics import fbeta_score, f1_score   # for threshold function. F1 score for evaluating loss weight scaling (tau)
+from sklearn.utils.class_weight import compute_class_weight
 from .functions import *
 
 def load_model(config, num_classes):
@@ -54,6 +55,48 @@ def init_model(config, num_classes, img_height, img_width):
     model_obj.summary()
     return(model_obj)
 
+# --- NEW HELPER FUNCTION ---   11/10/26
+def compute_balanced_weights(train_ds, tau):
+    """Calculates class weights using a power-law distribution based on tau."""
+    class_indices = []
+    for images, labels in train_ds.unbatch():
+        class_indices.append(labels.numpy())
+
+    class_indices = np.array(class_indices)
+    classes = np.unique(class_indices)
+
+    # Calculate occurrences of each class
+    counts = np.bincount(class_indices)
+
+    # Apply power law formula: w_i = (n_i + 1)^(-tau)
+    weights = (counts[classes] + 1) ** (-float(tau))
+
+    # Convert to dictionary format required by Keras
+    class_weight_dict = {cls: weight for cls, weight in zip(classes, weights)}
+    return class_weight_dict
+# ---------------------------
+
+# Record Macro F1 score for loss weight scaling evaluation
+class ValMacroF1Callback(tf.keras.callbacks.Callback):
+    def __init__(self, val_ds):
+        super().__init__()
+        self.val_ds = val_ds
+        # Pre-extract true labels once to speed up epoch transitions
+        self.y_true = np.concatenate([y for x, y in val_ds], axis=0)
+
+    def on_epoch_end(self, epoch, logs=None):
+        # Generate predictions for the validation set
+        y_pred_probs = self.model.predict(self.val_ds, verbose=0)
+        y_pred = np.argmax(y_pred_probs, axis=-1)
+        
+        # Calculate Macro F1
+        macro_f1 = f1_score(self.y_true, y_pred, average='macro', zero_division=0)
+        
+        # Add to logs so CSVLogger saves it
+        logs = logs or {}
+        logs['val_macro_f1'] = macro_f1
+        print(f" - val_macro_f1: {macro_f1:.4f}")
+#---------------------------------------------------
 
 def train_model(model, config, train_ds, val_ds, devices):
     csv_logger = tf.keras.callbacks.CSVLogger(
@@ -65,38 +108,44 @@ def train_model(model, config, train_ds, val_ds, devices):
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath = config['training']['model_path'] + os.path.sep + config['training']['model_name'] + '_checkpoint.keras',
         save_best_only = True,
-        monitor = 'val_loss',
-        mode = 'min',
+        monitor = 'val_macro_f1',  # <-- MODIFIED
+        mode = 'max',              # <-- MODIFIED
         save_weights_only = False,
-        save_freq = 'epoch' # Changed from 5 to 'epoch' to ensure validation metrics align
+        save_freq = 'epoch' 
     )
 
-    # Added: Automatically reduce learning rate when validation loss plateaus
     lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
-        monitor='val_loss',
+        monitor='val_macro_f1',    # <-- MODIFIED
+        mode='max',
         factor=0.5,
         patience=5,
         min_lr=1e-6,
         verbose=1
     )
 
-    # Added: Stop training safely if validation loss stops improving
     early_stopping = tf.keras.callbacks.EarlyStopping(
-        monitor='val_loss',
+        monitor='val_macro_f1',    # <-- MODIFIED
+        mode='max',                # <-- ADDED
         patience=20,
         restore_best_weights=True,
         verbose=1
     )
 
-    #with tf.device(devices):
+    # --- ADDED: Compute class weights here ---
+    print("Computing class weights to handle class imbalance...")
+    class_weight_dict = compute_balanced_weights(train_ds, config['training']['tau'])
+    # Macro F1 score
+    f1_callback = ValMacroF1Callback(val_ds)
+
     history = model.fit(
         train_ds,
         validation_data=val_ds,
         epochs=int(config['training']['stop'])-int(config['training']['start']),
         initial_epoch=int(config['training']['start']),
         batch_size = int(config['training']['batchsize']),
-        # Added missing callbacks to the training loop
-        callbacks=[csv_logger, checkpoint_callback, lr_scheduler, early_stopping]
+        class_weight=class_weight_dict,  # <-- ADDED: Pass class weights to fit
+        # --- MODIFIED: Insert f1_callback BEFORE csv_logger ---
+        callbacks=[f1_callback, csv_logger, checkpoint_callback, lr_scheduler, early_stopping]
     )
     
     return(model, history)
@@ -131,6 +180,29 @@ def getTensorflowDevices(logger):
             logger.debug(f"Device {idx}: {cpu}")
     return [x.name for x in devices]
 
+# add calibrate_thresholds
+def calibrate_f2_thresholds(y_true, predictions, class_names, logger):
+    logger.debug('Calibrating F2-score thresholds for target taxa.')
+    optimal_thresholds = {}
+    
+    for c_idx, class_name in enumerate(class_names):
+        best_thresh = 0.5
+        best_f2 = 0.0
+        
+        # Test candidate thresholds from 0.10 to 0.90
+        for thresh in np.arange(0.10, 0.90, 0.05):
+            y_true_binary = (y_true == c_idx).astype(int)
+            y_pred_binary = (predictions[:, c_idx] >= thresh).astype(int)
+            
+            score = fbeta_score(y_true_binary, y_pred_binary, beta=2, zero_division=0)
+            if score > best_f2:
+                best_f2 = score
+                best_thresh = thresh
+                
+        optimal_thresholds[class_name] = round(float(best_thresh), 2)
+        logger.debug(f"Calibrated {class_name}: Threshold {optimal_thresholds[class_name]} (F2: {best_f2:.4f})")
+        
+    return optimal_thresholds
 
 def mainTrain(config, logger):
 
@@ -194,6 +266,11 @@ def mainTrain(config, logger):
     prediction_matrix = pd.DataFrame(predictions, index = y, columns = train_ds.class_names)
     prediction_matrix.to_csv(config['training']['model_path'] + os.path.sep + config['training']['model_name'] + ' predictions.csv')
     
+    # --- NEW CALIBRATION STEP ---
+    # Pass the raw probabilities (predictions) and true labels (y) to find thresholds
+    calibrated_thresholds = calibrate_f2_thresholds(y, predictions, train_ds.class_names, logger)
+    # ----------------------------
+    
     logger.debug('Developing confusion matrix from validation dataset.')
     predictions = np.argmax(predictions, axis = -1)
     confusion_matrix = tf.math.confusion_matrix(y, predictions)
@@ -206,21 +283,17 @@ def mainTrain(config, logger):
     logger.debug('Generating model saidecar.')
     ## Generate sidecar dictionary:
     sidecar = {
-        'model_name' : config['training']['model_name'],
-        'model_type' : config['training']['model_type'],
-        'labels' : train_ds.class_names,
-        'script_version' : v_string,
-        'sessionid': str(datetime.datetime.now().strftime("%Y%m%d_%H%M%S")).replace(':', ''),
-        'config' : config,
-        'system_info' : {
-            'System' : platform.system(),
-            'Node' : platform.node(),
-            'Release' : platform.release(),
-            'Version' : platform.version(),
-            'Machine' : platform.machine(),
-            'Processor' : platform.processor()
+        'model_name' : config['training']['model_name'], #[cite: 6]
+        'model_type' : config['training']['model_type'], #[cite: 6]
+        'labels' : train_ds.class_names, #[cite: 6]
+        'thresholds' : calibrated_thresholds,  # <--- NEW KEY ADDED HERE
+        'script_version' : v_string, #[cite: 6]
+        'sessionid': str(datetime.datetime.now().strftime("%Y%m%d_%H%M%S")).replace(':', ''), #[cite: 6]
+        'config' : config, #[cite: 6]
+        'system_info' : { #[cite: 6]
+            # ... existing system info ...
         },
-        'timings' : timer
+        'timings' : timer #[cite: 6]
     }
     
     logger.debug(f"Writing model sidecar to {json_save_pathname}.")

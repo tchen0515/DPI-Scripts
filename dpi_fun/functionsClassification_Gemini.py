@@ -28,7 +28,24 @@ def loadModel(config, logger):
     label_path = config['classification']['model_dir'] + os.path.sep + config['classification']['model_name'] + ".json"
     logger.info(f"Loading model from {model_path}.")
     logger.info(f"Loading model sidecar from {label_path}.")
-    model = tf.keras.models.load_model(model_path)
+    
+    # 1. Save the original __init__ method of RandomRotation
+    original_init = tf.keras.layers.RandomRotation.__init__
+
+    # 2. Define a patched version that removes the problematic argument
+    def patched_init(self, *args, **kwargs):
+        kwargs.pop('value_range', None)
+        original_init(self, *args, **kwargs)
+
+    # 3. Apply the patch to the Keras class
+    tf.keras.layers.RandomRotation.__init__ = patched_init
+
+    try:
+        # 4. Load the model while the patch is active
+        model = tf.keras.models.load_model(model_path)
+    finally:
+        # 5. Restore the original Keras behavior immediately after
+        tf.keras.layers.RandomRotation.__init__ = original_init
 
     if config['classification']['feature_space']:
         ## Modify model for feature extraction:
@@ -191,7 +208,7 @@ def runClassifier(r, model, sidecar, config, logger):
             else :
                 # logger.debug(f"Skipping file {img}.")
                 pass
-        
+        # Applying threshold calibration on 11/10/2026
         if len(images) > 0:
             images = np.vstack(images)
             logger.debug("Finished loading images. Starting prediction.")
@@ -200,20 +217,26 @@ def runClassifier(r, model, sidecar, config, logger):
             df = pd.DataFrame(predictions, index = image_files) 
             if not config['classification']['feature_space']: 
                 df.columns = sidecar['labels']
+
+                # --- NEW: APPLY CALIBRATED THRESHOLDS ---
+                if 'thresholds' in sidecar:
+                    thresholds = np.array([sidecar['thresholds'][label] for label in sidecar['labels']])
+
+                    # Calculate ratio of prediction to threshold
+                    ratio = predictions / thresholds
+
+                    # Find indices where prediction >= threshold
+                    passed_threshold = predictions >= thresholds
+
+                    final_labels = []
+                    for i in range(len(predictions)):
+                        if np.any(passed_threshold[i]):
+                            # Among those that passed, pick the one with the highest margin (ratio)
+                            best_idx = np.argmax(ratio[i])
+                            final_labels.append(sidecar['labels'][best_idx])
+                        else:
+                            final_labels.append('Unknown')
+
+                    df['Calibrated_Prediction'] = final_labels
+                # ----------------------------------------
             df.to_csv(classification_output_filepath, index = True, header = True, sep = ',')
-        else:
-            logger.warn(f"No images found in archive {r}.")
-
-    except Exception as e:
-        logger.error(f"Error classifying {r}: {e}")
-
-    finally:
-        # === CLEANUP ===
-        # Always remove the unpacked folder to keep scratch/NFS clean
-        # Using shutil.rmtree which handles directories (unlike delete_file potentially)
-        if os.path.exists(unpack_path):
-            try:
-                shutil.rmtree(unpack_path)
-                logger.debug(f"Cleaned up {unpack_path}")
-            except Exception as e:
-                logger.error(f"Failed to cleanup {unpack_path}: {e}")

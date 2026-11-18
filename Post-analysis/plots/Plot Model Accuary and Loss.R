@@ -4,7 +4,7 @@ source('processing/mid level utilities.R')
 
 #### User input: 
 
-modelName = 'RNet50cce3'
+modelName = 'DNet169cce4'
 dataPath = 'F:/DPI/'
 outputDir = 'export_fig'
 
